@@ -267,3 +267,44 @@ def dataset_rows(trades, sizes, shot_counts, accounts=None):
             "notes_pre": (t.get("notes_pre") or "").replace("\n", " "), "notes_post": (t.get("notes_post") or "").replace("\n", " "),
         })
     return rows
+
+
+def twr(start, events, since=None, until=None):
+    """Retorno ponderado en el tiempo (TWR) encadenado entre flujos de caja.
+
+    events: (clave_ISO, 'trade'|'flow', importe). Un flujo (depósito/retiro) cierra el subperiodo:
+    R = valor_antes_del_flujo / valor_tras_el_flujo_anterior - 1; TWR = producto(1+R) - 1.
+    since/until acotan el periodo medido (el valor inicial incluye lo anterior a `since`).
+    Ganancia absoluta = beneficio / (capital al inicio + depósitos netos del periodo).
+    """
+    v, prev, factor = float(start), float(start), 1.0
+    started = since is None
+    base, flows, profit, curve = v, 0.0, 0.0, []
+    for key, kind, amt in sorted(events, key=lambda e: e[0]):
+        if until and key > until:
+            break
+        if not started and key >= since:
+            started, prev, base = True, v, v
+        if kind == "trade":
+            v += amt
+            if started:
+                profit += amt
+                curve.append({"t": key, "twr": round(((factor * v / prev) if prev > 0 else factor) * 100 - 100, 2)})
+        else:
+            if started and prev > 0:
+                factor *= v / prev
+            v += amt
+            prev = v
+            if started:
+                flows += amt
+    if not started:
+        base, prev = v, v
+    final = factor * (v / prev) if prev > 0 else factor
+    capital = base + flows
+    return {
+        "twr_pct": round(final * 100 - 100, 2),
+        "abs_gain_pct": round(profit / capital * 100, 2) if capital > 0 else None,
+        "profit": round(profit, 2),
+        "net_deposits": round(base + flows, 2),
+        "curve": curve,
+    }

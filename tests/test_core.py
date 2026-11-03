@@ -62,3 +62,22 @@ def test_us_dst_and_local_time():
     assert metrics.to_local("2026-01-05 17:00:00", "ny_close").hour == 10
     assert metrics.to_local("2026-07-06 17:00:00", "ny_close").hour == 9
     assert metrics.to_local("2026-01-05 17:00:00", "fixed", 3).hour == 9
+
+
+def test_twr_ignores_deposits():
+    # Ejemplo del informe: 10.000 -> 11.000 (+10 %), depósito 5.000, 16.000 -> 17.600 (+10 %) => TWR 21 %
+    ev = [("2026-01-10 10:00:00", "trade", 1000.0), ("2026-01-15 00:00:00", "flow", 5000.0),
+          ("2026-01-20 10:00:00", "trade", 1600.0)]
+    r = metrics.twr(10000, ev)
+    assert r["twr_pct"] == 21.0
+    assert r["profit"] == 2600.0 and r["net_deposits"] == 15000.0
+    assert r["abs_gain_pct"] == round(2600 / 15000 * 100, 2)
+    # retiro tras pérdida: no cuenta como pérdida
+    r2 = metrics.twr(1000, [("2026-02-01 10:00:00", "trade", -100.0), ("2026-02-02 00:00:00", "flow", -400.0)])
+    assert r2["twr_pct"] == -10.0
+
+
+def test_twr_since_uses_balance_at_start():
+    ev = [("2026-01-05 10:00:00", "trade", 1000.0), ("2026-02-05 10:00:00", "trade", 550.0)]
+    r = metrics.twr(10000, ev, since="2026-02-01 00:00:00")
+    assert r["twr_pct"] == 5.0 and r["profit"] == 550.0  # 550 sobre 11.000

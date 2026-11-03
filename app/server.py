@@ -1,4 +1,5 @@
 """API local (Flask). Escucha solo en 127.0.0.1."""
+import hashlib
 import os
 import shutil
 import sys
@@ -51,7 +52,18 @@ def clean(data):
     return out
 
 
-def filtered_trades():
+def scale_trades(trades):
+    """Convierte profit/comisión/swap a USD según la unidad de cada cuenta (cent = 0,01)."""
+    acc = accounts_map()
+    for t in trades:
+        k = (acc.get(t["account_id"]) or {}).get("money_scale") or 1.0
+        if k != 1:
+            for f in ("profit", "commission", "swap"):
+                t[f] = (t[f] or 0) * k
+    return trades
+
+
+def filtered_trades(scaled=False):
     where, args = ["1=1"], []
     for key, col in (("instrument", "instrument"), ("setup", "setup"), ("account", "account_id")):
         if request.args.get(key):
@@ -63,7 +75,8 @@ def filtered_trades():
     if request.args.get("to"):
         where.append("COALESCE(exit_time, entry_time) <= ?")
         args.append(request.args["to"] + " 23:59:59")
-    return rows(f"SELECT * FROM trades WHERE {' AND '.join(where)} ORDER BY COALESCE(exit_time, entry_time) DESC", args)
+    out = rows(f"SELECT * FROM trades WHERE {' AND '.join(where)} ORDER BY COALESCE(exit_time, entry_time) DESC", args)
+    return scale_trades(out) if scaled else out
 
 
 def with_net(trades):
@@ -121,13 +134,14 @@ def account_ids():
 
 def starting_balance():
     ids = account_ids()
-    q = f"SELECT COALESCE(SUM(starting_balance),0) AS s FROM accounts WHERE id IN ({','.join('?' * len(ids))})"
+    q = f"SELECT COALESCE(SUM(starting_balance * money_scale),0) AS s FROM accounts WHERE id IN ({','.join('?' * len(ids))})"
     return float(rows(q, ids)[0]["s"]) if ids else 0.0
 
 
 def movements_total():
     ids = account_ids()
-    q = f"SELECT COALESCE(SUM(amount),0) AS s FROM movements WHERE account_id IN ({','.join('?' * len(ids))})"
+    q = (f"SELECT COALESCE(SUM(m.amount * a.money_scale),0) AS s FROM movements m JOIN accounts a ON a.id = m.account_id "
+         f"WHERE m.account_id IN ({','.join('?' * len(ids))})")
     return float(rows(q, ids)[0]["s"]) if ids else 0.0
 
 
@@ -140,6 +154,7 @@ def get_accounts():
         a["movements"] = round(mv, 2)
         a["net"] = round(sum(metrics.net(t) for t in tr), 2)
         a["balance"] = round(a["starting_balance"] + mv + a["net"], 2)
+        a["balance_usd"] = round(a["balance"] * a["money_scale"], 2)
         a["n_trades"] = len(tr)
     return jsonify(out)
 
@@ -151,9 +166,10 @@ def create_account():
         return jsonify(error="Falta el nombre"), 400
     try:
         with db.connect() as c:
-            cur = c.execute("INSERT INTO accounts (name, kind, broker, currency, starting_balance, server_mode, server_offset) VALUES (?,?,?,?,?,?,?)",
+            cur = c.execute("INSERT INTO accounts (name, kind, broker, currency, starting_balance, server_mode, server_offset, money_scale) VALUES (?,?,?,?,?,?,?,?)",
                             (d["name"].strip(), d.get("kind", "real"), d.get("broker", ""), d.get("currency", "USD"),
-                             float(d.get("starting_balance") or 0), d.get("server_mode", "fixed"), float(d.get("server_offset") or 0)))
+                             float(d.get("starting_balance") or 0), d.get("server_mode", "fixed"), float(d.get("server_offset") or 0),
+                             float(d.get("money_scale") or 1)))
     except sqlite3.IntegrityError:
         return jsonify(error="Nombre repetido o tipo no válido"), 400
     return jsonify(id=cur.lastrowid), 201
@@ -166,10 +182,10 @@ def update_account(aid):
         return jsonify(error="El nombre no puede estar vacío"), 400
     try:
         with db.connect() as c:
-            c.execute("UPDATE accounts SET name=?, kind=?, broker=?, currency=?, starting_balance=?, active=?, server_mode=?, server_offset=? WHERE id=?",
+            c.execute("UPDATE accounts SET name=?, kind=?, broker=?, currency=?, starting_balance=?, active=?, server_mode=?, server_offset=?, money_scale=? WHERE id=?",
                   (d["name"].strip(), d["kind"], d.get("broker", ""), d.get("currency", "USD"),
                    float(d.get("starting_balance") or 0), int(d.get("active", 1)), d.get("server_mode", "fixed"),
-                   float(d.get("server_offset") or 0), aid))
+                   float(d.get("server_offset") or 0), float(d.get("money_scale") or 1), aid))
     except sqlite3.IntegrityError:
         return jsonify(error="Nombre repetido o valor no válido"), 400
     return jsonify(ok=True)
@@ -208,7 +224,7 @@ def delete_movement(mid):
 @app.get("/api/periods")
 def get_periods():
     kind = "week" if request.args.get("kind") == "week" else "month"
-    out = metrics.periods(metrics.enrich(filtered_trades(), sizes(), accounts_map()), kind)
+    out = metrics.periods(metrics.enrich(filtered_trades(True), sizes(), accounts_map()), kind)
     rev = {r["period"]: r for r in rows("SELECT * FROM reviews")}
     for row in out:
         row["review"] = rev.get(row["period"], {"went_well": "", "to_improve": "", "next_goal": ""})
@@ -227,7 +243,7 @@ def put_review(period):
 @app.get("/api/analysis")
 def analysis():
     """Estadística descriptiva por tramos. Cada tramo lleva su n y un aviso si la muestra es pequeña."""
-    closed = metrics.enrich(filtered_trades(), sizes(), accounts_map())
+    closed = metrics.enrich(filtered_trades(True), sizes(), accounts_map())
 
     def entry(t):  # hora de Colombia
         return metrics._dt(t["entry_local"])
@@ -250,7 +266,7 @@ def export_dataset():
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=metrics.DATASET_COLUMNS)
     w.writeheader()
-    w.writerows(metrics.dataset_rows(filtered_trades(), sizes(), counts, accounts_map()))
+    w.writerows(metrics.dataset_rows(filtered_trades(True), sizes(), counts, accounts_map()))
     return Response("﻿" + buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=dataset-operaciones.csv"})
 
@@ -329,10 +345,51 @@ def shot(name):
     return send_from_directory(db.SHOTS_DIR, name)
 
 
+def twr_for(ids, since=None, until=None):
+    """TWR y ganancia absoluta en USD de las cuentas indicadas, a partir de operaciones cerradas y flujos de caja."""
+    if not ids:
+        return metrics.twr(0, [])
+    ph = ",".join("?" * len(ids))
+    acc = accounts_map()
+    trades = scale_trades(rows(f"SELECT * FROM trades WHERE account_id IN ({ph}) AND exit_time IS NOT NULL", ids))
+    mv = rows(f"SELECT m.date, m.amount * a.money_scale AS amt FROM movements m JOIN accounts a ON a.id = m.account_id "
+              f"WHERE m.account_id IN ({ph})", ids)
+    start = sum(acc[i]["starting_balance"] * acc[i]["money_scale"] for i in ids)
+    events = [(t["exit_time"], "trade", metrics.net(t)) for t in trades] + [(m["date"] + " 00:00:00", "flow", m["amt"]) for m in mv]
+    return metrics.twr(start, events, since, until)
+
+
+@app.get("/api/trackrecord")
+def trackrecord():
+    """Resumen íntegro: siempre desde el primer movimiento o la primera operación; ignora el filtro de fechas."""
+    ids = account_ids()
+    ph = ",".join("?" * len(ids)) or "NULL"
+    trades = scale_trades(rows(f"SELECT * FROM trades WHERE account_id IN ({ph}) ORDER BY entry_time", ids))
+    closed = [t for t in trades if t["exit_time"]]
+    mv = rows(f"SELECT date FROM movements WHERE account_id IN ({ph}) ORDER BY date", ids)
+    starts = [t["entry_time"][:10] for t in trades[:1]] + [m["date"] for m in mv[:1]]
+    comp = metrics.compute(closed, sizes(), starting_balance(), accounts_map())
+    tw = twr_for(ids)
+    imported = sum(1 for t in trades if t["source"] != "manual")
+    return jsonify(
+        period_start=min(starts) if starts else None,
+        period_end=max((t["exit_time"][:10] for t in closed), default=None),
+        n_trades=len(closed), n_open=len(trades) - len(closed),
+        imported_pct=round(imported / len(trades) * 100) if trades else None,
+        twr_pct=tw["twr_pct"], abs_gain_pct=tw["abs_gain_pct"], profit_usd=tw["profit"], net_deposits_usd=tw["net_deposits"],
+        max_drawdown_pct=comp["max_drawdown_pct"], twr_curve=tw["curve"],
+        imports=rows(f"SELECT i.*, a.name AS account FROM imports i JOIN accounts a ON a.id = i.account_id "
+                     f"WHERE i.account_id IN ({ph}) ORDER BY i.id DESC", ids),
+    )
+
+
 @app.get("/api/metrics")
 def get_metrics():
-    m = metrics.compute(filtered_trades(), sizes(), starting_balance(), accounts_map())
+    m = metrics.compute(filtered_trades(True), sizes(), starting_balance(), accounts_map())
     m["balance"] = round(m["starting_balance"] + movements_total() + m["total_net"], 2)
+    since = request.args["from"] + " 00:00:00" if request.args.get("from") else None
+    until = request.args["to"] + " 23:59:59" if request.args.get("to") else None
+    m["twr"] = twr_for(account_ids(), since, until)
     return jsonify(m)
 
 
@@ -342,7 +399,10 @@ def import_file():
     if not f:
         return jsonify(error="Falta el archivo"), 400
     acc = int(request.form.get("account_id") or rows("SELECT MIN(id) AS i FROM accounts")[0]["i"])
-    parsed = importer.parse_file(f.filename or "", f.read())
+    raw = f.read()
+    digest = hashlib.sha256(raw).hexdigest()
+    seen = bool(rows("SELECT 1 FROM imports WHERE sha256=? AND account_id=?", (digest, acc)))
+    parsed = importer.parse_file(f.filename or "", raw)
     added = dup = 0
     unknown = {}
     with db.connect() as c:
@@ -361,7 +421,9 @@ def import_file():
                 added += 1
             else:
                 dup += 1
-    return jsonify(read=len(parsed), added=added, duplicates=dup, skipped_symbols=unknown)
+        c.execute("INSERT INTO imports (account_id, filename, sha256, imported_at, n_read, n_added, n_dup) VALUES (?,?,?,?,?,?,?)",
+                  (acc, f.filename or "", digest, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), len(parsed), added, dup))
+    return jsonify(read=len(parsed), added=added, duplicates=dup, skipped_symbols=unknown, already_imported=seen)
 
 
 @app.get("/api/export")

@@ -23,7 +23,7 @@ function qs() {
 function show(tab) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   document.querySelectorAll("main > section").forEach(s => (s.hidden = s.id !== "tab-" + tab));
-  $("#filters").hidden = !["resumen", "periodos", "analisis", "operaciones"].includes(tab);
+  $("#filters").hidden = !["resumen", "periodos", "analisis", "trackrecord", "operaciones"].includes(tab);
 }
 $("#tabs").addEventListener("click", e => e.target.dataset.tab && show(e.target.dataset.tab));
 ["#f-inst", "#f-acc", "#f-from", "#f-to"].forEach(s => $(s).addEventListener("change", refresh));
@@ -81,7 +81,9 @@ async function loadSummary() {
   const m = await api("/api/metrics?" + qs());
   $("#kpis").innerHTML = [
     kpi("Balance", money(m.balance)),
-    kpi("P&L neto", money(m.total_net), cls(m.total_net)),
+    kpi("P&L neto (USD)", money(m.total_net), cls(m.total_net)),
+    kpi("Retorno TWR", `${m.twr.twr_pct} %`, cls(m.twr.twr_pct)),
+    kpi("Ganancia absoluta", m.twr.abs_gain_pct == null ? "—" : `${m.twr.abs_gain_pct} %`, cls(m.twr.abs_gain_pct)),
     kpi("Operaciones", `${m.n}${m.open ? ` (+${m.open} abiertas)` : ""}`),
     kpi("Win rate", m.win_rate + " %"),
     kpi("Profit factor", m.profit_factor ?? "—"),
@@ -225,7 +227,7 @@ $("#import-btn").onclick = async () => {
   try {
     const r = await api("/api/import", { method: "POST", body: fd });
     const sk = Object.entries(r.skipped_symbols).map(([s, n]) => `${s} (${n})`).join(", ");
-    $("#import-msg").textContent = `Leídas ${r.read} · nuevas ${r.added} · duplicadas ${r.duplicates}` + (sk ? ` · símbolos no reconocidos y omitidos: ${sk}` : "");
+    $("#import-msg").textContent = (r.already_imported ? "Este archivo ya se había importado antes. " : "") + `Leídas ${r.read} · nuevas ${r.added} · duplicadas ${r.duplicates}` + (sk ? ` · símbolos no reconocidos y omitidos: ${sk}` : "");
     refresh();
   } catch (err) { $("#import-msg").textContent = err.message; }
 };
@@ -251,10 +253,11 @@ async function loadSettings() {
       <label>Tipo<select data-f="kind">${sel(x.kind, [["real", "Real"], ["demo", "Demo"], ["fondeo", "Fondeo"]])}</select></label>
       <label>Bróker<input data-f="broker" value="${esc(x.broker)}"></label>
       <label>Balance inicial<input data-f="starting_balance" type="number" step="any" value="${x.starting_balance}"></label>
+      <label>Unidad<select data-f="money_scale">${sel(String(x.money_scale), [["1", "USD (normal)"], ["0.01", "USC (cuenta cent)"]])}</select></label>
       <label>Hora del servidor MT5<select data-f="server_mode">${sel(x.server_mode, [["utc", "UTC (GMT+0)"], ["ny_close", "Cierre NY (GMT+2/+3)"], ["fixed", "Fija (desfase)"]])}</select></label>
       <label>Desfase fijo (h vs UTC)<input data-f="server_offset" type="number" step="any" value="${x.server_offset}"></label>
     </div>
-    <p class="muted">Dep./retiros ${money(x.movements)} · P&amp;L <span class="${cls(x.net)}">${money(x.net)}</span> · Balance <b>${money(x.balance)}</b> · ${x.n_trades} operaciones${x.active ? "" : " · archivada"}</p>
+    <p class="muted">Dep./retiros ${money(x.movements)} · P&amp;L <span class="${cls(x.net)}">${money(x.net)}</span> · Balance <b>${money(x.balance)}</b>${x.money_scale !== 1 ? ` (≈ ${money(x.balance_usd)} USD)` : ""} · ${x.n_trades} operaciones${x.active ? "" : " · archivada"}</p>
     <div class="actions"><button class="small" data-save-acc="${x.id}">Guardar cambios</button>
       <button class="small ghost" data-toggle="${x.id}">${x.active ? "Archivar" : "Reactivar"}</button></div></div>`).join("");
   const mv = await api("/api/movements");
@@ -269,7 +272,7 @@ $("#inst-table").addEventListener("click", async e => {
 });
 $("#acc-add").onclick = async () => {
   try {
-    await api("/api/accounts", post({ name: $("#acc-name").value, kind: $("#acc-kind").value, broker: $("#acc-broker").value, starting_balance: $("#acc-start").value, server_mode: $("#acc-smode").value, server_offset: $("#acc-soff").value }));
+    await api("/api/accounts", post({ name: $("#acc-name").value, kind: $("#acc-kind").value, broker: $("#acc-broker").value, starting_balance: $("#acc-start").value, money_scale: $("#acc-unit").value, server_mode: $("#acc-smode").value, server_offset: $("#acc-soff").value }));
     $("#acc-name").value = ""; $("#acc-msg").textContent = ""; await loadSettings();
   } catch (err) { $("#acc-msg").textContent = err.message; }
 };
@@ -306,5 +309,38 @@ $("#quit").onclick = async () => {
 };
 api("/api/version").then(v => ($("#data-where").textContent = `Versión ${v.version} · datos en ${v.data_dir}`));
 
-async function refresh() { await Promise.all([loadSummary(), loadTrades(), loadPeriods(), loadAnalysis()]); }
+// ---------- track record ----------
+function lineChart(el, pts, key, fmt) {
+  if (pts.length < 2) { el.innerHTML = '<p class="muted">Se necesitan al menos 2 operaciones cerradas.</p>'; return; }
+  const W = 900, H = 220, L = 60, B = 24, T = 10, R = 10;
+  const ys = pts.map(p => p[key]).concat(0), min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+  const x = i => L + i / (pts.length - 1) * (W - L - R), y = v => T + (1 - (v - min) / span) * (H - T - B);
+  const path = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join("");
+  const color = pts[pts.length - 1][key] >= 0 ? "var(--pos)" : "var(--neg)";
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Curva TWR">
+    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)" stroke-dasharray="4 4"/>
+    <text x="${L - 6}" y="${y(max) + 4}" text-anchor="end">${fmt(max)}</text><text x="${L - 6}" y="${y(min) + 4}" text-anchor="end">${fmt(min)}</text>
+    <text x="${L}" y="${H - 6}">${pts[0].t.slice(0, 10)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${pts[pts.length - 1].t.slice(0, 10)}</text>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+}
+async function loadTrackRecord() {
+  const t = await api("/api/trackrecord?" + (qs().match(/account=\d+/) || [""])[0]);
+  $("#tr-kpis").innerHTML = [
+    kpi("Periodo", t.period_start ? `${t.period_start} → ${t.period_end || "—"}` : "—"),
+    kpi("Retorno TWR", `${t.twr_pct} %`, cls(t.twr_pct)),
+    kpi("Ganancia absoluta", t.abs_gain_pct == null ? "—" : `${t.abs_gain_pct} %`, cls(t.abs_gain_pct)),
+    kpi("Beneficio (USD)", money(t.profit_usd), cls(t.profit_usd)),
+    kpi("Capital aportado (USD)", money(t.net_deposits_usd)),
+    kpi("Máx. drawdown", `${t.max_drawdown_pct} %`, t.max_drawdown_pct ? "neg" : ""),
+    kpi("Operaciones", `${t.n_trades}${t.n_open ? ` (+${t.n_open} abiertas)` : ""}`),
+    kpi("Importadas del bróker", t.imported_pct == null ? "—" : `${t.imported_pct} %`),
+  ].join("");
+  lineChart($("#tr-chart"), t.twr_curve, "twr", v => v.toFixed(1) + " %");
+  $("#tr-imports").innerHTML = t.imports.length
+    ? "<tr><th>Fecha</th><th>Cuenta</th><th>Archivo</th><th class=n>Leídas</th><th class=n>Nuevas</th><th>SHA-256</th></tr>" + t.imports.map(i =>
+      `<tr><td>${i.imported_at}</td><td>${esc(i.account)}</td><td>${esc(i.filename)}</td><td class=n>${i.n_read}</td><td class=n>${i.n_added}</td><td title="${i.sha256}"><code>${i.sha256.slice(0, 16)}…</code></td></tr>`).join("")
+    : '<tr><td class="muted">Todavía no hay importaciones.</td></tr>';
+}
+
+async function refresh() { await Promise.all([loadSummary(), loadTrades(), loadPeriods(), loadAnalysis(), loadTrackRecord()]); }
 loadSettings().then(refresh);

@@ -1,7 +1,7 @@
 """Acceso a SQLite y rutas de datos.
 
 Datos: DIARIO_DATA_DIR si existe; si no, modo portable (`datos/` junto al ejecutable, si ya existe o hay
-`portable.txt`); instalado: %APPDATA%\DiarioTrading\datos (el instalador no lo toca al actualizar o desinstalar).
+`portable.txt`); instalado: %APPDATA%/DiarioTrading/datos (el instalador no lo toca al actualizar o desinstalar).
 """
 import os
 import sqlite3
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     starting_balance REAL NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     server_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (server_mode IN ('utc','fixed','ny_close')),
-    server_offset REAL NOT NULL DEFAULT 0
+    server_offset REAL NOT NULL DEFAULT 0,
+    money_scale REAL NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +83,16 @@ CREATE TABLE IF NOT EXISTS reviews (
     went_well TEXT DEFAULT '',
     to_improve TEXT DEFAULT '',
     next_goal TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    filename TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    n_read INTEGER NOT NULL,
+    n_added INTEGER NOT NULL,
+    n_dup INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS trade_shots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,6 +130,8 @@ def init():
         if "account_id" not in cols:
             conn.execute("ALTER TABLE trades ADD COLUMN account_id INTEGER REFERENCES accounts(id)")
         acols = {r["name"] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "money_scale" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN money_scale REAL NOT NULL DEFAULT 1")
         if "server_mode" not in acols:
             conn.execute("ALTER TABLE accounts ADD COLUMN server_mode TEXT NOT NULL DEFAULT 'fixed'")
             conn.execute("ALTER TABLE accounts ADD COLUMN server_offset REAL NOT NULL DEFAULT 0")

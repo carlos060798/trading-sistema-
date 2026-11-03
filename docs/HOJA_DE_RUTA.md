@@ -30,3 +30,12 @@ Tamaño de muestra orientativo (cálculo): ±10 % en el win rate al 95 % pide un
 - Sesiones (Asia/Londres/NY) y killzones: sin consenso entre fuentes; no se implementan hasta definir las propias.
 - Valores de contrato: ES $50, MES $5, NQ $20, MNQ $2 por punto; GC 100 oz, MGC 10 oz (tick $0,10). Coinciden en varias fuentes secundarias, pero cmegroup.com no respondió: sin verificar en CME. No afectan a CFD, cuyo tamaño de contrato depende del bróker.
 - TWR por cuenta (Rk = V⁻k / V⁺k−1 − 1, encadenado) si hay muchos flujos de caja.
+
+## Hecho en v0.3.0
+- Retorno TWR y ganancia absoluta (separados de depósitos y retiros), en Resumen y en la pestaña Track record.
+- Track record íntegro: siempre desde el primer movimiento u operación, con registro de importaciones y huella SHA-256 de cada archivo.
+- Cuentas cent (USC): se guardan en su unidad y el análisis se normaliza a USD.
+
+## Siguiente (barrido de herramientas, ordenado por impacto/esfuerzo)
+Monte Carlo y riesgo de ruina; checklist previo y adherencia al plan; costes netos con spread estimado; histograma de R; curva underwater; drawdown de equity flotante y alertas (requiere datos que el HTML no trae); MAE/MFE (requiere precios intra-operación).
+

@@ -13,6 +13,7 @@
     <button data-tab="resumen" class="on">Resumen</button>
     <button data-tab="periodos">Semanas y meses</button>
     <button data-tab="analisis">Análisis</button>
+    <button data-tab="trackrecord">Track record</button>
     <button data-tab="operaciones">Operaciones</button>
     <button data-tab="nueva">Nueva</button>
     <button data-tab="importar">Importar</button>
@@ -47,6 +48,19 @@
     <button data-kind="week" class="kind on">Semanal</button><button data-kind="month" class="kind ghost">Mensual</button>
   </div>
   <div id="periods"></div>
+</section>
+
+<section id="tab-trackrecord" hidden>
+  <div class="card">
+    <h2>Track record</h2>
+    <p class="muted">Siempre desde el primer movimiento u operación: no depende del filtro de fechas, así no se pueden ocultar las pérdidas iniciales. Importes en USD (las cuentas cent se convierten). El retorno TWR no se ve afectado por depósitos ni retiros.</p>
+    <div id="tr-kpis" class="kpis"></div>
+    <div id="tr-chart"></div>
+  </div>
+  <div class="card"><h2>Registro de importaciones</h2>
+    <p class="muted">Cada archivo importado queda registrado con su huella SHA-256: sirve para comprobar que el informe de MT5 no se ha modificado.</p>
+    <table id="tr-imports"></table>
+  </div>
 </section>
 
 <section id="tab-analisis" hidden>
@@ -137,6 +151,7 @@
       <label>Tipo<select id="acc-kind"><option value="real">Real</option><option value="demo">Demo</option><option value="fondeo">Fondeo</option></select></label>
       <label>Bróker<input id="acc-broker"></label>
       <label>Balance inicial<input id="acc-start" type="number" step="any" value="0"></label>
+      <label>Unidad de la cuenta<select id="acc-unit"><option value="1">USD (normal)</option><option value="0.01">USC (cuenta cent)</option></select></label>
       <label>Hora del servidor MT5<select id="acc-smode"><option value="utc">UTC (GMT+0)</option><option value="ny_close">Cierre NY (GMT+2 / +3 verano EE.UU.)</option><option value="fixed">Fija (indicar desfase)</option></select></label>
       <label>Desfase fijo (h vs UTC)<input id="acc-soff" type="number" step="any" value="0"></label>
     </div>

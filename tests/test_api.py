@@ -134,3 +134,26 @@ def test_edit_account_and_movement():
     assert c.put(f"/api/movements/{mid}", json={"date": "2026-02-02", "amount": 150, "note": "ajuste"}).status_code == 200
     m = [x for x in c.get("/api/movements").json if x["id"] == mid][0]
     assert (m["date"], m["amount"], m["note"]) == ("2026-02-02", 150, "ajuste")
+
+
+def test_cent_account_is_normalized_to_usd():
+    acc = c.post("/api/accounts", json={"name": "Cent USC", "kind": "real", "starting_balance": 10000, "money_scale": 0.01}).json["id"]
+    trade(account_id=acc, profit=500, commission=0, entry_price=100, sl=99, volume=1, exit_price=105)  # 500 USC = 5 USD
+    m = c.get(f"/api/metrics?account={acc}").json
+    assert m["starting_balance"] == 100.0 and m["total_net"] == 5.0 and m["balance"] == 105.0
+    assert m["twr"]["twr_pct"] == 5.0 and m["twr"]["abs_gain_pct"] == 5.0
+    a = [x for x in c.get("/api/accounts").json if x["id"] == acc][0]
+    assert a["balance"] == 10500.0 and a["balance_usd"] == 105.0   # nativo en USC, equivalente en USD
+    raw = [t for t in c.get("/api/trades").json if t["account_id"] == acc][0]
+    assert raw["profit"] == 500   # la lista y la edición conservan la unidad nativa
+
+
+def test_trackrecord_and_import_log():
+    acc = c.post("/api/accounts", json={"name": "TR", "starting_balance": 1000}).json["id"]
+    mk = lambda: {"file": (io.BytesIO(HTML.encode("utf-16")), "informe.html"), "account_id": str(acc)}
+    r1 = c.post("/api/import", data=mk(), content_type="multipart/form-data").json
+    r2 = c.post("/api/import", data=mk(), content_type="multipart/form-data").json
+    assert r1["already_imported"] is False and r2["already_imported"] is True
+    t = c.get(f"/api/trackrecord?account={acc}&from=2030-01-01").json   # ignora el filtro de fechas
+    assert t["n_trades"] == 2 and t["imported_pct"] == 100 and t["period_start"] == "2026-01-05"
+    assert len(t["imports"]) == 2 and len(t["imports"][0]["sha256"]) == 64
