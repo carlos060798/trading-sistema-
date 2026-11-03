@@ -157,3 +157,18 @@ def test_trackrecord_and_import_log():
     t = c.get(f"/api/trackrecord?account={acc}&from=2030-01-01").json   # ignora el filtro de fechas
     assert t["n_trades"] == 2 and t["imported_pct"] == 100 and t["period_start"] == "2026-01-05"
     assert len(t["imports"]) == 2 and len(t["imports"][0]["sha256"]) == 64
+
+
+def test_delete_account():
+    a = c.post("/api/accounts", json={"name": "Borrar", "starting_balance": 10}).json["id"]
+    tid = trade(account_id=a).json["id"]
+    c.post(f"/api/trades/{tid}/shots", data={"file": (io.BytesIO(b"\x89PNG"), "a.png")}, content_type="multipart/form-data")
+    c.post("/api/movements", json={"account_id": a, "date": "2026-03-01", "amount": 5})
+    r = c.delete(f"/api/accounts/{a}")
+    assert r.status_code == 409 and r.json["n_trades"] == 1      # con operaciones exige confirmación
+    assert c.delete(f"/api/accounts/{a}?force=1").json["deleted_trades"] == 1
+    assert a not in [x["id"] for x in c.get("/api/accounts").json]
+    assert not [m for m in c.get("/api/movements").json if m["account"] == "Borrar"]
+    assert tid not in [t["id"] for t in c.get("/api/trades").json]
+    empty = c.post("/api/accounts", json={"name": "Vacia"}).json["id"]
+    assert c.delete(f"/api/accounts/{empty}").status_code == 200  # sin operaciones: sin force

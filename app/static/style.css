@@ -50,3 +50,4 @@ a{color:var(--accent)}
 .acc{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}
 .acc.archived{opacity:.6}
 #mv-table input{min-width:110px}
+button.danger{color:var(--neg)}

@@ -191,6 +191,28 @@ def update_account(aid):
     return jsonify(ok=True)
 
 
+@app.delete("/api/accounts/<int:aid>")
+def delete_account(aid):
+    """Elimina una cuenta. Si tiene operaciones exige ?force=1 y borra también operaciones, capturas, movimientos e importaciones."""
+    if len(rows("SELECT id FROM accounts")) <= 1:
+        return jsonify(error="No se puede eliminar la única cuenta. Edítala o crea otra antes."), 400
+    n = rows("SELECT COUNT(*) AS n FROM trades WHERE account_id=?", (aid,))[0]["n"]
+    if n and request.args.get("force") != "1":
+        return jsonify(error="La cuenta tiene operaciones", n_trades=n), 409
+    files = [r["file"] for r in rows("SELECT file FROM trade_shots WHERE trade_id IN (SELECT id FROM trades WHERE account_id=?)", (aid,))]
+    with db.connect() as c:
+        c.execute("DELETE FROM trade_shots WHERE trade_id IN (SELECT id FROM trades WHERE account_id=?)", (aid,))
+        for table in ("trades", "movements", "imports"):
+            c.execute(f"DELETE FROM {table} WHERE account_id=?", (aid,))
+        c.execute("DELETE FROM accounts WHERE id=?", (aid,))
+    for f in files:
+        try:
+            os.remove(os.path.join(db.SHOTS_DIR, f))
+        except OSError:
+            pass
+    return jsonify(ok=True, deleted_trades=n)
+
+
 @app.get("/api/movements")
 def get_movements():
     return jsonify(rows("SELECT m.*, a.name AS account FROM movements m JOIN accounts a ON a.id=m.account_id ORDER BY date DESC"))

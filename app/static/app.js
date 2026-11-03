@@ -259,7 +259,8 @@ async function loadSettings() {
     </div>
     <p class="muted">Dep./retiros ${money(x.movements)} · P&amp;L <span class="${cls(x.net)}">${money(x.net)}</span> · Balance <b>${money(x.balance)}</b>${x.money_scale !== 1 ? ` (≈ ${money(x.balance_usd)} USD)` : ""} · ${x.n_trades} operaciones${x.active ? "" : " · archivada"}</p>
     <div class="actions"><button class="small" data-save-acc="${x.id}">Guardar cambios</button>
-      <button class="small ghost" data-toggle="${x.id}">${x.active ? "Archivar" : "Reactivar"}</button></div></div>`).join("");
+      <button class="small ghost" data-toggle="${x.id}">${x.active ? "Archivar" : "Reactivar"}</button>
+      <button class="small ghost danger" data-del-acc="${x.id}">Eliminar</button></div></div>`).join("");
   const mv = await api("/api/movements");
   $("#mv-table").innerHTML = mv.length ? "<tr><th>Cuenta</th><th>Fecha</th><th>Importe</th><th>Nota</th><th></th></tr>" + mv.map(m =>
     `<tr data-mv="${m.id}"><td>${esc(m.account)}</td><td><input data-f="date" type="date" value="${m.date}"></td><td><input data-f="amount" type="number" step="any" value="${m.amount}"></td><td><input data-f="note" value="${esc(m.note)}"></td><td><button class="small" data-mvsave="${m.id}">Guardar</button> <button class="small ghost" data-mvdel="${m.id}">✕</button></td></tr>`).join("") : "";
@@ -278,6 +279,19 @@ $("#acc-add").onclick = async () => {
 };
 const fields = el => Object.fromEntries([...el.querySelectorAll("[data-f]")].map(i => [i.dataset.f, i.value]));
 $("#acc-table").addEventListener("click", async e => {
+  const del = e.target.dataset.delAcc;
+  if (del) {
+    const x = accounts.find(a => a.id == del);
+    if (!confirm(`¿Eliminar la cuenta "${x.name}"? No se puede deshacer.`)) return;
+    let r = await fetch("/api/accounts/" + del, { method: "DELETE" }), j = await r.json();
+    if (r.status === 409) {
+      if (!confirm(`La cuenta tiene ${j.n_trades} operaciones. Se borrarán también sus operaciones, capturas, movimientos e importaciones.\n\n¿Eliminar todo de todos modos? (Para conservar los datos usa Archivar.)`)) return;
+      r = await fetch("/api/accounts/" + del + "?force=1", { method: "DELETE" }); j = await r.json();
+    }
+    $("#acc-msg").textContent = r.ok ? "Cuenta eliminada" : j.error;
+    await loadSettings(); refresh();
+    return;
+  }
   const id = e.target.dataset.saveAcc || e.target.dataset.toggle; if (!id) return;
   const x = accounts.find(a => a.id == id), box = e.target.closest("[data-acc]");
   const body = e.target.dataset.saveAcc ? { ...x, ...fields(box) } : { ...x, active: x.active ? 0 : 1 };
