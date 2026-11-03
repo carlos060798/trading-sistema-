@@ -118,3 +118,19 @@ def test_hour_analysis_uses_colombia_time():
     assert "10h" in c.get(f"/api/metrics?account={acc}").json["by_hour"]
     row = c.get(f"/api/export/dataset.csv?account={acc}").data.decode("utf-8-sig").splitlines()[1]
     assert "2026-03-02 10:00:00" in row
+
+
+def test_edit_account_and_movement():
+    aid = c.post("/api/accounts", json={"name": "Cent", "starting_balance": 0}).json["id"]
+    r = c.put(f"/api/accounts/{aid}", json={"name": "Cuenta cent Exness", "kind": "real", "broker": "Exness",
+                                            "starting_balance": 250.5, "server_mode": "utc", "active": 1})
+    assert r.status_code == 200
+    a = [x for x in c.get("/api/accounts").json if x["id"] == aid][0]
+    assert a["name"] == "Cuenta cent Exness" and a["starting_balance"] == 250.5 and a["broker"] == "Exness"
+    assert c.put(f"/api/accounts/{aid}", json={"name": "Principal", "kind": "real"}).status_code == 400  # repetido
+    assert c.put(f"/api/accounts/{aid}", json={"name": " ", "kind": "real"}).status_code == 400
+    c.post("/api/movements", json={"account_id": aid, "date": "2026-02-01", "amount": 100})
+    mid = c.get("/api/movements").json[0]["id"]
+    assert c.put(f"/api/movements/{mid}", json={"date": "2026-02-02", "amount": 150, "note": "ajuste"}).status_code == 200
+    m = [x for x in c.get("/api/movements").json if x["id"] == mid][0]
+    assert (m["date"], m["amount"], m["note"]) == ("2026-02-02", 150, "ajuste")

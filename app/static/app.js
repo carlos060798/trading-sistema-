@@ -244,14 +244,22 @@ async function loadSettings() {
     `<tr><td>${i.name}</td><td><input data-c="${i.code}" data-f="contract_size" type="number" step="any" value="${i.contract_size}"></td>
      <td><input data-c="${i.code}" data-f="tick_size" type="number" step="any" value="${i.tick_size}"></td>
      <td><button class="small" data-save="${i.code}">Guardar</button></td></tr>`).join("");
-  $("#acc-table").innerHTML = "<tr><th>Cuenta</th><th>Tipo</th><th class=n>Inicial</th><th class=n>Dep./retiros</th><th class=n>P&L</th><th class=n>Balance</th><th class=n>Ops</th><th>Hora servidor MT5</th><th></th></tr>" +
-    accounts.map(x => `<tr><td>${esc(x.name)} <span class="muted">${esc(x.broker)}</span></td><td>${x.kind}</td><td class=n>${money(x.starting_balance)}</td>
-      <td class=n>${money(x.movements)}</td><td class="n ${cls(x.net)}">${money(x.net)}</td><td class=n><b>${money(x.balance)}</b></td><td class=n>${x.n_trades}</td>
-      <td><select data-sm="${x.id}"><option value="utc" ${x.server_mode==="utc"?"selected":""}>UTC</option><option value="ny_close" ${x.server_mode==="ny_close"?"selected":""}>Cierre NY</option><option value="fixed" ${x.server_mode==="fixed"?"selected":""}>Fija</option></select> <input data-so="${x.id}" type="number" step="any" value="${x.server_offset}" style="width:70px" title="Desfase fijo en horas respecto a UTC"></td>
-      <td><button class="small ghost" data-toggle="${x.id}">${x.active ? "Archivar" : "Reactivar"}</button></td></tr>`).join("");
+  const sel = (v, list) => list.map(([k, t]) => `<option value="${k}" ${v === k ? "selected" : ""}>${t}</option>`).join("");
+  $("#acc-table").innerHTML = accounts.map(x => `<div class="acc ${x.active ? "" : "archived"}" data-acc="${x.id}">
+    <div class="cols">
+      <label>Nombre<input data-f="name" value="${esc(x.name)}"></label>
+      <label>Tipo<select data-f="kind">${sel(x.kind, [["real", "Real"], ["demo", "Demo"], ["fondeo", "Fondeo"]])}</select></label>
+      <label>Bróker<input data-f="broker" value="${esc(x.broker)}"></label>
+      <label>Balance inicial<input data-f="starting_balance" type="number" step="any" value="${x.starting_balance}"></label>
+      <label>Hora del servidor MT5<select data-f="server_mode">${sel(x.server_mode, [["utc", "UTC (GMT+0)"], ["ny_close", "Cierre NY (GMT+2/+3)"], ["fixed", "Fija (desfase)"]])}</select></label>
+      <label>Desfase fijo (h vs UTC)<input data-f="server_offset" type="number" step="any" value="${x.server_offset}"></label>
+    </div>
+    <p class="muted">Dep./retiros ${money(x.movements)} · P&amp;L <span class="${cls(x.net)}">${money(x.net)}</span> · Balance <b>${money(x.balance)}</b> · ${x.n_trades} operaciones${x.active ? "" : " · archivada"}</p>
+    <div class="actions"><button class="small" data-save-acc="${x.id}">Guardar cambios</button>
+      <button class="small ghost" data-toggle="${x.id}">${x.active ? "Archivar" : "Reactivar"}</button></div></div>`).join("");
   const mv = await api("/api/movements");
-  $("#mv-table").innerHTML = mv.length ? "<tr><th>Fecha</th><th>Cuenta</th><th class=n>Importe</th><th>Nota</th><th></th></tr>" + mv.map(m =>
-    `<tr><td>${m.date}</td><td>${esc(m.account)}</td><td class="n ${cls(m.amount)}">${money(m.amount)}</td><td>${esc(m.note)}</td><td><button class="small ghost" data-mvdel="${m.id}">✕</button></td></tr>`).join("") : "";
+  $("#mv-table").innerHTML = mv.length ? "<tr><th>Cuenta</th><th>Fecha</th><th>Importe</th><th>Nota</th><th></th></tr>" + mv.map(m =>
+    `<tr data-mv="${m.id}"><td>${esc(m.account)}</td><td><input data-f="date" type="date" value="${m.date}"></td><td><input data-f="amount" type="number" step="any" value="${m.amount}"></td><td><input data-f="note" value="${esc(m.note)}"></td><td><button class="small" data-mvsave="${m.id}">Guardar</button> <button class="small ghost" data-mvdel="${m.id}">✕</button></td></tr>`).join("") : "";
 }
 $("#inst-table").addEventListener("click", async e => {
   const c = e.target.dataset.save; if (!c) return;
@@ -265,15 +273,16 @@ $("#acc-add").onclick = async () => {
     $("#acc-name").value = ""; $("#acc-msg").textContent = ""; await loadSettings();
   } catch (err) { $("#acc-msg").textContent = err.message; }
 };
-$("#acc-table").addEventListener("change", async e => {
-  const id = e.target.dataset.sm || e.target.dataset.so; if (!id) return;
-  const x = accounts.find(a => a.id == id);
-  const mode = $(`[data-sm="${id}"]`).value, off = $(`[data-so="${id}"]`).value;
-  await api("/api/accounts/" + id, put({ ...x, server_mode: mode, server_offset: off })); await loadSettings(); refresh();
-});
+const fields = el => Object.fromEntries([...el.querySelectorAll("[data-f]")].map(i => [i.dataset.f, i.value]));
 $("#acc-table").addEventListener("click", async e => {
-  const x = accounts.find(a => a.id == e.target.dataset.toggle); if (!x) return;
-  await api("/api/accounts/" + x.id, put({ ...x, active: x.active ? 0 : 1 })); await loadSettings(); refresh();
+  const id = e.target.dataset.saveAcc || e.target.dataset.toggle; if (!id) return;
+  const x = accounts.find(a => a.id == id), box = e.target.closest("[data-acc]");
+  const body = e.target.dataset.saveAcc ? { ...x, ...fields(box) } : { ...x, active: x.active ? 0 : 1 };
+  try {
+    await api("/api/accounts/" + id, put(body));
+    $("#acc-msg").textContent = e.target.dataset.saveAcc ? "Cuenta guardada" : "";
+    await loadSettings(); refresh();
+  } catch (err) { $("#acc-msg").textContent = err.message; }
 });
 $("#mv-add").onclick = async () => {
   if (!$("#mv-date").value || !$("#mv-amount").value) return;
@@ -281,6 +290,10 @@ $("#mv-add").onclick = async () => {
   $("#mv-amount").value = $("#mv-note").value = ""; await loadSettings(); refresh();
 };
 $("#mv-table").addEventListener("click", async e => {
+  if (e.target.dataset.mvsave) {
+    await api("/api/movements/" + e.target.dataset.mvsave, put(fields(e.target.closest("[data-mv]"))));
+    await loadSettings(); refresh(); return;
+  }
   if (e.target.dataset.mvdel) { await api("/api/movements/" + e.target.dataset.mvdel, { method: "DELETE" }); await loadSettings(); refresh(); }
 });
 $("#dataset-link").addEventListener("click", e => { e.currentTarget.href = "/api/export/dataset.csv?" + qs(); });

@@ -47,3 +47,6 @@ a{color:var(--accent)}
 .period textarea{margin-bottom:6px}
 .warn{color:var(--muted);font-style:italic}
 .ci{color:var(--muted);font-size:12px}
+.acc{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}
+.acc.archived{opacity:.6}
+#mv-table input{min-width:110px}

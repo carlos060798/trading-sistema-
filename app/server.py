@@ -162,11 +162,16 @@ def create_account():
 @app.put("/api/accounts/<int:aid>")
 def update_account(aid):
     d = request.get_json()
-    with db.connect() as c:
-        c.execute("UPDATE accounts SET name=?, kind=?, broker=?, currency=?, starting_balance=?, active=?, server_mode=?, server_offset=? WHERE id=?",
+    if not (d.get("name") or "").strip():
+        return jsonify(error="El nombre no puede estar vacío"), 400
+    try:
+        with db.connect() as c:
+            c.execute("UPDATE accounts SET name=?, kind=?, broker=?, currency=?, starting_balance=?, active=?, server_mode=?, server_offset=? WHERE id=?",
                   (d["name"].strip(), d["kind"], d.get("broker", ""), d.get("currency", "USD"),
                    float(d.get("starting_balance") or 0), int(d.get("active", 1)), d.get("server_mode", "fixed"),
                    float(d.get("server_offset") or 0), aid))
+    except sqlite3.IntegrityError:
+        return jsonify(error="Nombre repetido o valor no válido"), 400
     return jsonify(ok=True)
 
 
@@ -182,6 +187,15 @@ def create_movement():
         c.execute("INSERT INTO movements (account_id, date, amount, note) VALUES (?,?,?,?)",
                   (int(d["account_id"]), d["date"], float(d["amount"]), d.get("note", "")))
     return jsonify(ok=True), 201
+
+
+@app.put("/api/movements/<int:mid>")
+def update_movement(mid):
+    d = request.get_json()
+    with db.connect() as c:
+        c.execute("UPDATE movements SET date=?, amount=?, note=? WHERE id=?",
+                  (d["date"], float(d["amount"]), d.get("note", ""), mid))
+    return jsonify(ok=True)
 
 
 @app.delete("/api/movements/<int:mid>")
