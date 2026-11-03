@@ -1,0 +1,65 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: python -m pip install -r requirements.txt pytest pyinstaller
+
+      - name: Pruebas
+        run: python -m pytest -q tests
+
+      - name: Versión
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app\__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Ejecutable
+        run: python -m PyInstaller --noconfirm --onefile --noconsole --name DiarioTrading --add-data "app\static;app\static" run.py
+
+      - name: Instalador
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.ver.outputs.version }}" installer\DiarioTrading.iss
+
+      - name: Versión portable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist\portable | Out-Null
+          Copy-Item dist\DiarioTrading.exe dist\portable\
+          "" | Out-File dist\portable\portable.txt
+          Compress-Archive dist\portable\* dist\DiarioTrading-portable-${{ steps.ver.outputs.version }}.zip
+
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/DiarioTrading-Setup-${{ steps.ver.outputs.version }}.exe
+            dist/DiarioTrading-portable-${{ steps.ver.outputs.version }}.zip
+
+      - name: Guardar artefactos (ejecuciones manuales)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiarioTrading
+          path: dist/DiarioTrading-*

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diario de Trading</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Diario de Trading <small>Oro · S&amp;P 500 · Nasdaq 100</small></h1>
+  <nav id="tabs">
+    <button data-tab="resumen" class="on">Resumen</button>
+    <button data-tab="periodos">Semanas y meses</button>
+    <button data-tab="analisis">Análisis</button>
+    <button data-tab="operaciones">Operaciones</button>
+    <button data-tab="nueva">Nueva</button>
+    <button data-tab="importar">Importar</button>
+    <button data-tab="ajustes">Ajustes</button>
+    <button id="quit" class="ghost" title="Cierra el diario">Salir</button>
+  </nav>
+</header>
+<div id="filters">
+  <select id="f-acc"><option value="">Todas las cuentas</option></select>
+  <select id="f-inst"><option value="">Todos los instrumentos</option></select>
+  <label>Desde <input type="date" id="f-from"></label>
+  <label>Hasta <input type="date" id="f-to"></label>
+  <button id="f-clear" class="ghost">Limpiar</button>
+</div>
+
+<main>
+<section id="tab-resumen">
+  <div id="kpis" class="kpis"></div>
+  <div class="card"><h2>Curva de capital</h2><div id="equity"></div></div>
+  <div class="grid">
+    <div class="card"><h2>Por instrumento</h2><div id="g-instrument"></div></div>
+    <div class="card"><h2>Por etiqueta de setup</h2><div id="g-setup"></div></div>
+    <div class="card"><h2>Por día de la semana</h2><div id="g-weekday"></div></div>
+    <div class="card"><h2>Por hora de entrada (hora de Colombia)</h2><div id="g-hour"></div></div>
+    <div class="card"><h2>Errores</h2><div id="g-mistake"></div></div>
+  </div>
+  <div class="card"><h2>Calendario de P&amp;L diario</h2><div id="calendar"></div></div>
+</section>
+
+<section id="tab-periodos" hidden>
+  <div class="actions" style="margin-bottom:12px">
+    <button data-kind="week" class="kind on">Semanal</button><button data-kind="month" class="kind ghost">Mensual</button>
+  </div>
+  <div id="periods"></div>
+</section>
+
+<section id="tab-analisis" hidden>
+  <div class="card">
+    <p class="muted" id="analysis-note"></p>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>Por hora de entrada (hora de Colombia)</h2><div id="a-hour"></div></div>
+    <div class="card"><h2>Por día de la semana</h2><div id="a-weekday"></div></div>
+    <div class="card"><h2>Por tamaño de posición (lotes)</h2><div id="a-volume"></div></div>
+    <div class="card"><h2>Por setup</h2><div id="a-setup"></div></div>
+  </div>
+</section>
+
+<section id="tab-operaciones" hidden>
+  <div class="card"><table id="trades"></table></div>
+</section>
+
+<section id="tab-nueva" hidden>
+  <div class="card"><h2 id="form-title">Nueva operación</h2>
+    <form id="trade-form">
+      <input type="hidden" name="id">
+      <div class="cols">
+        <label>Cuenta<select name="account_id"></select></label>
+        <label>Instrumento<select name="instrument" required></select></label>
+        <label>Lado<select name="side"><option value="buy">Compra</option><option value="sell">Venta</option></select></label>
+        <label>Volumen (lotes)<input name="volume" type="number" step="any" required></label>
+        <label>Entrada (fecha/hora)<input name="entry_time" type="datetime-local" step="1" required></label>
+        <label>Precio entrada<input name="entry_price" type="number" step="any" required></label>
+        <label>Stop loss<input name="sl" type="number" step="any"></label>
+        <label>Take profit<input name="tp" type="number" step="any"></label>
+        <label>Salida (fecha/hora)<input name="exit_time" type="datetime-local" step="1"></label>
+        <label>Precio salida<input name="exit_price" type="number" step="any"></label>
+        <label>Comisión (negativa)<input name="commission" type="number" step="any" value="0"></label>
+        <label>Swap<input name="swap" type="number" step="any" value="0"></label>
+        <label>Beneficio bruto<input name="profit" type="number" step="any" placeholder="auto si hay salida"></label>
+      </div>
+      <h3>Diario</h3>
+      <div class="cols">
+        <label>Setup<input name="setup" list="setups" placeholder="p. ej. ruptura, pullback"></label>
+        <label>Estado emocional (1-5)<input name="emotion" type="number" min="1" max="5"></label>
+        <label>Ejecución vs plan<select name="plan_grade"><option value=""></option><option>A</option><option>B</option><option>C</option></select></label>
+        <label>Error principal<input name="mistake" list="mistakes" placeholder="vacío si ninguno"></label>
+      </div>
+      <datalist id="setups"></datalist><datalist id="mistakes"></datalist>
+      <label>Antes de entrar (plan, contexto)<textarea name="notes_pre" rows="3"></textarea></label>
+      <label>Después (resultado, lección)<textarea name="notes_post" rows="3"></textarea></label>
+      <label>Capturas del gráfico (por qué tomé esta operación)
+        <input type="file" id="shot" accept="image/*" multiple>
+      </label>
+      <div id="paste-zone" tabindex="0">Pega aquí una captura (Ctrl+V) o elige archivos arriba</div>
+      <div id="shot-list" class="shots"></div>
+      <div class="actions"><button type="submit">Guardar</button><button type="button" id="cancel-edit" class="ghost">Cancelar</button></div>
+      <p id="form-msg" class="msg"></p>
+    </form>
+  </div>
+</section>
+
+<section id="tab-importar" hidden>
+  <div class="card">
+    <h2>Importar desde MetaTrader 5</h2>
+    <ol>
+      <li>En MT5: pestaña <b>Historial de cuenta</b> → clic derecho → <b>Informe → HTML</b> (o Informe de historial de operaciones).</li>
+      <li>Elige el rango de fechas y guarda el archivo.</li>
+      <li>Súbelo aquí. Los duplicados se ignoran, así que puedes reimportar periodos solapados.</li>
+    </ol>
+    <label>Cuenta de destino<select id="import-acc"></select></label>
+    <input type="file" id="import-file" accept=".htm,.html,.csv">
+    <button id="import-btn">Importar</button>
+    <p id="import-msg" class="msg"></p>
+    <details><summary>Formato CSV propio</summary>
+      <pre>position,symbol,side,volume,entry_time,exit_time,entry_price,exit_price,sl,tp,commission,swap,profit
+12345,XAUUSD,buy,0.10,2026-01-05 10:00:00,2026-01-05 11:30:00,2650.10,2655.40,2645.00,0,-0.70,0,53.00</pre>
+    </details>
+  </div>
+</section>
+
+<section id="tab-ajustes" hidden>
+  <div class="card"><h2>Instrumentos</h2>
+    <p class="muted">Tamaño de contrato = unidades por 1.00 lote. Compruébalo en MT5 (clic derecho en el símbolo → Especificación). Solo afecta al cálculo de R y a las operaciones manuales; las importadas usan el beneficio del informe.</p>
+    <table id="inst-table"></table>
+  </div>
+  <div class="card"><h2>Cuentas</h2>
+    <table id="acc-table"></table>
+    <h3>Nueva cuenta</h3>
+    <div class="cols">
+      <label>Nombre<input id="acc-name"></label>
+      <label>Tipo<select id="acc-kind"><option value="real">Real</option><option value="demo">Demo</option><option value="fondeo">Fondeo</option></select></label>
+      <label>Bróker<input id="acc-broker"></label>
+      <label>Balance inicial<input id="acc-start" type="number" step="any" value="0"></label>
+      <label>Hora del servidor MT5<select id="acc-smode"><option value="utc">UTC (GMT+0)</option><option value="ny_close">Cierre NY (GMT+2 / +3 verano EE.UU.)</option><option value="fixed">Fija (indicar desfase)</option></select></label>
+      <label>Desfase fijo (h vs UTC)<input id="acc-soff" type="number" step="any" value="0"></label>
+    </div>
+    <button id="acc-add">Crear cuenta</button> <span id="acc-msg" class="msg"></span>
+  </div>
+  <div class="card"><h2>Depósitos y retiros</h2>
+    <p class="muted">No cuentan como ganancia ni pérdida: ajustan el balance, pero no el rendimiento ni el drawdown.</p>
+    <div class="cols">
+      <label>Cuenta<select id="mv-acc"></select></label>
+      <label>Fecha<input id="mv-date" type="date"></label>
+      <label>Importe (retiro en negativo)<input id="mv-amount" type="number" step="any"></label>
+      <label>Nota<input id="mv-note"></label>
+    </div>
+    <button id="mv-add">Añadir</button>
+    <table id="mv-table"></table>
+  </div>
+  <div class="card"><h2>Datos</h2>
+    <button id="backup">Crear copia de seguridad</button>
+    <a href="/api/export" download="diario-export.json"><button class="ghost" type="button">Exportar todo (JSON)</button></a>
+    <a href="/api/export/dataset.csv" id="dataset-link"><button class="ghost" type="button">Dataset limpio (CSV)</button></a>
+    <p id="data-msg" class="msg"></p>
+    <p class="muted" id="data-where"></p>
+  </div>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
